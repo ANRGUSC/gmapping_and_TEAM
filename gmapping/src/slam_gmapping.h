@@ -31,6 +31,10 @@
 
 #include "ros/ros.h"
 #include "sensor_msgs/LaserScan.h"
+// Lilly
+#include "gazebo_msgs/ModelState.h"
+#include "gazebo_msgs/ModelStates.h"
+
 #include "std_msgs/Float64.h"
 #include "nav_msgs/GetMap.h"
 #include "tf/transform_listener.h"
@@ -55,7 +59,10 @@ class SlamGMapping
     void startLiveSlam();
     void startReplay(const std::string & bag_fname, std::string scan_topic);
     void publishTransform();
-  
+
+    // Lilly
+    void pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx);
+
     void laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan);
     bool mapCallback(nav_msgs::GetMap::Request  &req,
                      nav_msgs::GetMap::Response &res);
@@ -69,6 +76,8 @@ class SlamGMapping
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
     message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
+    // Lilly
+    ros::Subscriber pozyx_sub_;
     tf::MessageFilter<sensor_msgs::LaserScan>* scan_filter_;
     tf::TransformBroadcaster* tfB_;
 
@@ -90,6 +99,9 @@ class SlamGMapping
     bool got_map_;
     nav_msgs::GetMap::Response map_;
 
+    // Lilly
+    GMapping::OrientedPoint pozyxpose;
+
     ros::Duration map_update_interval_;
     tf::Transform map_to_odom_;
     boost::mutex map_to_odom_mutex_;
@@ -100,6 +112,8 @@ class SlamGMapping
 
     boost::thread* transform_thread_;
 
+    // Lilly
+    std::string policy_;
     std::string base_frame_;
     std::string laser_frame_;
     std::string map_frame_;
@@ -110,7 +124,7 @@ class SlamGMapping
     bool initMapper(const sensor_msgs::LaserScan& scan);
     bool addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose);
     double computePoseEntropy();
-    
+
     // Parameters used by GMapping
     double maxRange_;
     double maxUrange_;
@@ -143,11 +157,11 @@ class SlamGMapping
     double llsamplestep_;
     double lasamplerange_;
     double lasamplestep_;
-    
+
     ros::NodeHandle private_nh_;
-    
+
     unsigned long int seed_;
-    
+
     double transform_publish_period_;
     double tf_delay_;
 };
