@@ -100,7 +100,9 @@ class SlamGMapping
     nav_msgs::GetMap::Response map_;
 
     // Lilly
+    bool got_first_pozyx_;
     GMapping::OrientedPoint pozyxpose;
+    GMapping::GridSlamProcessor::TNode* p;
 
     ros::Duration map_update_interval_;
     tf::Transform map_to_odom_;

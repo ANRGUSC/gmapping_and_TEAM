@@ -182,7 +182,7 @@ void SlamGMapping::init()
   got_map_ = false;
 
   // Lilly
-  GMapping::OrientedPoint pozyxpose;
+  got_first_pozyx_ = false;
 
   // Parameters used by our GMapping wrapper
   if(!private_nh_.getParam("throttle_scans", throttle_scans_))
@@ -525,6 +525,11 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
     initialPose = GMapping::OrientedPoint(0.0, 0.0, 0.0);
   }
 
+  // Lilly
+  // initialize node for traversing tree
+  // pose, weight, parent, childs
+  p = new GMapping::GridSlamProcessor::TNode(initialPose,0,NULL,0);
+
   gsp_->setMatchingParameters(maxUrange_, maxRange_, sigma_,
                               kernelSize_, lstep_, astep_, iterations_,
                               lsigma_, ogain_, lskip_);
@@ -597,6 +602,24 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
   // need to keep our array around.
   delete[] ranges_double;
 
+  // Lilly
+  // create node from pozyxpose, reading, parent
+  if(got_first_pozyx_){
+      ROS_INFO("Making Tnode");
+      // pose, weight, parent, childs
+      GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
+                                    &(reading[0]),
+                                    static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
+                                    reading.getTime());
+
+      GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(pozyxpose,0,p,0);
+      // reading.setPose(pozyxpose);
+      np->reading = reading_copy;
+      p = np;
+  }else{
+      ROS_INFO("Don't have pozyx");
+  }
+
   reading.setPose(gmap_pose);
 
   /*
@@ -615,7 +638,6 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 void
 SlamGMapping::pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx)
 {
-    // To do: some kind of transform probably
     ROS_DEBUG("pozyx callback");
     tf::Quaternion q(
         pozyx->pose.orientation.x,
@@ -626,11 +648,12 @@ SlamGMapping::pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx)
     tf::Matrix3x3 m(q);
     double roll, pitch, yaw;
     m.getRPY(roll,pitch,yaw);
-    // GMapping::OrientedPoint pozyxpose(pozyx->pose.position.x, pozyx->pose.position.y,yaw);
 
     pozyxpose.x = pozyx->pose.position.x;
     pozyxpose.y = pozyx->pose.position.y;
     pozyxpose.theta = yaw;
+
+    got_first_pozyx_ = true;
 }
 
 void
@@ -674,19 +697,21 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     }
 
     if(policy_.compare("clam")==0) {
-        ROS_INFO("using clam");
-        GMapping::OrientedPoint mpose = pozyxpose;
+        if(got_first_pozyx_){
+            ROS_INFO("using clam");
+            // addScan(*scan, pozyxpose);
 
-        ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
-        ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-        ROS_DEBUG("correction: %.3f %.3f %.3f", mpose.x - odom_pose.x, mpose.y - odom_pose.y, mpose.theta - odom_pose.theta);
+            ROS_DEBUG("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
+            ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
+            ROS_DEBUG("correction: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
 
-        tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, mpose.theta), tf::Vector3(mpose.x, mpose.y, 0.0)).inverse();
-        tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
+            tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta), tf::Vector3(pozyxpose.x, pozyxpose.y, 0.0)).inverse();
+            tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
 
-        map_to_odom_mutex_.lock();
-        map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
-        map_to_odom_mutex_.unlock();
+            map_to_odom_mutex_.lock();
+            map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
+            map_to_odom_mutex_.unlock();
+        }
     }
 
     if(!got_map_ || (scan->header.stamp - last_map_update) > map_update_interval_)
@@ -723,10 +748,11 @@ SlamGMapping::computePoseEntropy()
 void
 SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
 {
-  ROS_DEBUG("Update map");
+  ROS_INFO("Update map");
   boost::mutex::scoped_lock map_lock (map_mutex_);
   GMapping::ScanMatcher matcher;
 
+  // to do: should this still be gsp_laser_
   matcher.setLaserParameters(scan.ranges.size(), &(laser_angles_[0]),
                              gsp_laser_->getPose());
 
@@ -734,13 +760,6 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   matcher.setusableRange(maxUrange_);
   matcher.setgenerateMap(true);
 
-  GMapping::GridSlamProcessor::Particle best =
-          gsp_->getParticles()[gsp_->getBestParticleIndex()];
-
-  std_msgs::Float64 entropy;
-  entropy.data = computePoseEntropy();
-  if(entropy.data > 0.0)
-    entropy_publisher_.publish(entropy);
 
   if(!got_map_) {
     map_.map.info.resolution = delta_;
@@ -760,9 +779,17 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   GMapping::ScanMatcherMap smap(center, xmin_, ymin_, xmax_, ymax_,
                                 delta_);
 
+  // Lilly
   if(policy_.compare("slam")==0) {
-      // if slam
-      ROS_DEBUG("Trajectory tree:");
+      GMapping::GridSlamProcessor::Particle best =
+              gsp_->getParticles()[gsp_->getBestParticleIndex()];
+
+      std_msgs::Float64 entropy;
+      entropy.data = computePoseEntropy();
+      if(entropy.data > 0.0)
+        entropy_publisher_.publish(entropy);
+
+      ROS_INFO("(slam) Trajectory tree:");
       for(GMapping::GridSlamProcessor::TNode* n = best.node;
           n;
           n = n->parent)
@@ -783,53 +810,34 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   }
 
   // Lilly
-  // if clam
   if(policy_.compare("clam")==0) {
-      ROS_DEBUG("  %.3f %.3f %.3f",
-                pozyxpose.x,
-                pozyxpose.y,
-                pozyxpose.theta);
+      ROS_INFO("(clam) Trajectory tree:");
+      for(GMapping::GridSlamProcessor::TNode* n = p;
+          n->parent!=NULL;
+          n = n->parent)
+          {
+            ROS_INFO("  %.3f %.3f %.3f",
+                      n->pose.x,
+                      n->pose.y,
+                      n->pose.theta);
+            if(!n->reading)
+            {
+              ROS_INFO("Reading is NULL");
+              continue;
+            }
 
-        // GMapping wants an array of doubles...
-        double* ranges_double = new double[scan.ranges.size()];
-        // If the angle increment is negative, we have to invert the order of the readings.
-        if (do_reverse_range_)
-        {
-          ROS_DEBUG("Inverting scan");
-          int num_ranges = scan.ranges.size();
-          for(int i=0; i < num_ranges; i++)
-          {
-            // Must filter out short readings, because the mapper won't
-            if(scan.ranges[num_ranges - i - 1] < scan.range_min)
-              ranges_double[i] = (double)scan.range_max;
-            else
-              ranges_double[i] = (double)scan.ranges[num_ranges - i - 1];
-          }
-        } else
-        {
-          for(unsigned int i=0; i < scan.ranges.size(); i++)
-          {
-            // Must filter out short readings, because the mapper won't
-            if(scan.ranges[i] < scan.range_min)
-              ranges_double[i] = (double)scan.range_max;
-            else
-              ranges_double[i] = (double)scan.ranges[i];
-          }
+            assert((*n->reading).size()==gsp_laser_beam_count_);
+            double * plainReading = new double[gsp_laser_beam_count_];
+            for(unsigned int i=0; i<gsp_laser_beam_count_; i++){
+      	         plainReading[i]=(*n->reading)[i];
+            }
+
+            matcher.invalidateActiveArea();
+            matcher.computeActiveArea(smap, n->pose, plainReading);
+            matcher.registerScan(smap, n->pose, plainReading);
         }
-
-        GMapping::RangeReading reading(scan.ranges.size(),
-                                       ranges_double,
-                                       gsp_laser_,
-                                       scan.header.stamp.toSec());
-
-        // ...but it deep copies them in RangeReading constructor, so we don't
-        // need to keep our array around.
-        delete[] ranges_double;
-
-        matcher.invalidateActiveArea();
-        matcher.computeActiveArea(smap, pozyxpose, &((reading)[0]));
-        matcher.registerScan(smap, pozyxpose, &((reading)[0]));
   }
+
 
   // the map may have expanded, so resize ros message as well
   if(map_.map.info.width != (unsigned int) smap.getMapSizeX() || map_.map.info.height != (unsigned int) smap.getMapSizeY()) {
@@ -873,6 +881,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
     }
   }
   got_map_ = true;
+  ROS_INFO("Got map");
 
   //make sure to set the header information on the map
   map_.map.header.stamp = ros::Time::now();
