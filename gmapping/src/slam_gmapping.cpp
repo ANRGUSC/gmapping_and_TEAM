@@ -186,7 +186,7 @@ void SlamGMapping::init()
 
   // Parameters used by our GMapping wrapper
   if(!private_nh_.getParam("throttle_scans", throttle_scans_))
-    throttle_scans_ = 5; //1;
+    throttle_scans_ = 1;
   if(!private_nh_.getParam("base_frame", base_frame_))
     base_frame_ = "base_link";
   if(!private_nh_.getParam("map_frame", map_frame_))
