@@ -106,6 +106,8 @@ class SlamGMapping
     bool got_first_pozyx_;
     GMapping::OrientedPoint pozyxpose;
     GMapping::GridSlamProcessor::TNode* p;
+    GMapping::OrientedPoint initialOdomPose;
+    GMapping::OrientedPoint initialPozyxPose;
 
     ros::Duration map_update_interval_;
     tf::Transform map_to_odom_;
