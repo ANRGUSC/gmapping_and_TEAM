@@ -276,7 +276,10 @@ void SlamGMapping::startLiveSlam()
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamGMapping::mapCallback, this);
   // Lilly
-  pozyx_sub_ = node_.subscribe("pozyx_position", 10, &SlamGMapping::pozyxCallback, this);
+  // pozyx_sub_ = node_.subscribe("pozyx_position", 10, &SlamGMapping::pozyxCallback, this);
+  pozyx_filter_sub_ = new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "pozyx_position", 5);
+  pozyx_filter_ = new tf::MessageFilter<geometry_msgs::PoseStamped>(*pozyx_filter_sub_, tf_, odom_frame_, 5);
+  pozyx_filter_->registerCallback(boost::bind(&SlamGMapping::pozyxCallback, this, _1));
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
@@ -613,7 +616,6 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
                                     reading.getTime());
 
       GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(pozyxpose,0,p,0);
-      // reading.setPose(pozyxpose);
       np->reading = reading_copy;
       p = np;
   }else{
@@ -636,9 +638,20 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 
 // Lilly
 void
-SlamGMapping::pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx)
+SlamGMapping::pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx)
 {
     ROS_DEBUG("pozyx callback");
+    // if(got_first_scan_){
+    // tf::Stamped<tf::Pose> stampedin(tf::Transform(tf::createQuaternionFromRPY(0,0,0),tf::Vector3(0,0,0)), ros::Time::now(), laser_frame_);
+    // // tf::Stamped<tf::Pose> stampedin(pozyx->pose, ros::Time::now(), laser_frame_);
+    // tf::Stamped<tf::Transform> stampedout;
+    // tf_.transformPose(odom_frame_, stampedin, stampedout);
+
+    // double yaw = tf::getYaw(stampedout.getRotation());
+    // pozyxpose.x = stampedout.getOrigin().x();
+    // pozyxpose.y = stampedout.getOrigin().y();
+    // pozyxpose.theta = yaw;
+
     tf::Quaternion q(
         pozyx->pose.orientation.x,
         pozyx->pose.orientation.y,
@@ -684,9 +697,9 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         ROS_INFO("using slam");
         GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
 
-        ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
-        ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-        ROS_DEBUG("correction: %.3f %.3f %.3f", mpose.x - odom_pose.x, mpose.y - odom_pose.y, mpose.theta - odom_pose.theta);
+        ROS_INFO("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
+        ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
+        ROS_INFO("correction: %.3f %.3f %.3f", mpose.x - odom_pose.x, mpose.y - odom_pose.y, mpose.theta - odom_pose.theta);
 
         tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, mpose.theta), tf::Vector3(mpose.x, mpose.y, 0.0)).inverse();
         tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
@@ -697,13 +710,14 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     }
 
     if(policy_.compare("clam")==0) {
+        // this one ends up upside down for whatever reason
         if(got_first_pozyx_){
             ROS_INFO("using clam");
             // addScan(*scan, pozyxpose);
 
-            ROS_DEBUG("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
-            ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-            ROS_DEBUG("correction: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
+            ROS_INFO("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
+            ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
+            ROS_INFO("correction: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
 
             tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta), tf::Vector3(pozyxpose.x, pozyxpose.y, 0.0)).inverse();
             tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
@@ -816,7 +830,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
           n->parent!=NULL;
           n = n->parent)
           {
-            ROS_INFO("  %.3f %.3f %.3f",
+            ROS_DEBUG("  %.3f %.3f %.3f",
                       n->pose.x,
                       n->pose.y,
                       n->pose.theta);

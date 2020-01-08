@@ -61,7 +61,8 @@ class SlamGMapping
     void publishTransform();
 
     // Lilly
-    void pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx);
+    // void pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx);
+    void pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx);
 
     void laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan);
     bool mapCallback(nav_msgs::GetMap::Request  &req,
@@ -76,9 +77,11 @@ class SlamGMapping
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
     message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
-    // Lilly
-    ros::Subscriber pozyx_sub_;
     tf::MessageFilter<sensor_msgs::LaserScan>* scan_filter_;
+    // Lilly
+    // ros::Subscriber pozyx_sub_;
+    message_filters::Subscriber<geometry_msgs::PoseStamped>* pozyx_filter_sub_;
+    tf::MessageFilter<geometry_msgs::PoseStamped>* pozyx_filter_;
     tf::TransformBroadcaster* tfB_;
 
     GMapping::GridSlamProcessor* gsp_;
