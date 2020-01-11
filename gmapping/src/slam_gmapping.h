@@ -105,6 +105,7 @@ class SlamGMapping
     // Lilly
     bool got_first_pozyx_;
     GMapping::OrientedPoint pozyxpose;
+    ros::Time pozyxtime;
     GMapping::GridSlamProcessor::TNode* p;
     GMapping::OrientedPoint initialOdomPose;
     GMapping::OrientedPoint initialPozyxPose;
