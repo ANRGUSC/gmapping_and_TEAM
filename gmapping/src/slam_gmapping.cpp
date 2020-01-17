@@ -552,7 +552,12 @@ SlamGMapping::initMapper(const sensor_msgs::LaserScan& scan)
   /// lasamplerange.  It was probably a typo, but who knows.
   gsp_->setlasamplerange(lasamplerange_);
   gsp_->setlasamplestep(lasamplestep_);
-  gsp_->setminimumScore(minimum_score_);
+  if(policy_.compare("odom-only")!=0){
+      gsp_->setminimumScore(minimum_score_);
+  } else {
+      gsp_->setminimumScore(1000);
+  }
+
 
   // Call the sampling function once to set the seed.
   GMapping::sampleGaussian(1,seed_);
@@ -609,7 +614,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 
   // Lilly
   // create node from pozyxpose, reading, parent
-  if(got_first_pozyx_){
+  if(got_first_pozyx_ && policy_.compare("clam")==0){
       // pose, weight, parent, childs
       ros::Duration delay = pozyxtime - scan.header.stamp;
       ROS_INFO("%d",delay.sec*1000+delay.nsec/1000000);
@@ -627,7 +632,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
           ROS_INFO("Delay between pozyxpose and reading is too high.");
       }
   }else{
-      ROS_INFO("Don't have pozyx yet");
+      ROS_INFO("Not using pozyx");
   }
 
   reading.setPose(gmap_pose);
@@ -704,7 +709,7 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     ROS_DEBUG("scan processed");
 
     // Lilly
-    if(policy_.compare("slam")==0) {
+    if(policy_.compare("slam")==0 || policy_.compare("odom-only")==0) {
         ROS_INFO("using slam");
         GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
 
@@ -809,7 +814,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
                                 delta_);
 
   // Lilly
-  if(policy_.compare("slam")==0) {
+  if(policy_.compare("slam")==0 || policy_.compare("odom-only")==0) {
       GMapping::GridSlamProcessor::Particle best =
               gsp_->getParticles()[gsp_->getBestParticleIndex()];
 
@@ -916,6 +921,9 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   map_.map.header.stamp = ros::Time::now();
   map_.map.header.frame_id = tf_.resolve( map_frame_ );
 
+  // int rand_ = rand();
+  // ROS_INFO("%f",1.0*rand_/RAND_MAX);
+  // ros::Duration(1.0*rand_/RAND_MAX).sleep();
   sst_.publish(map_.map);
   sstm_.publish(map_.map.info);
 }
