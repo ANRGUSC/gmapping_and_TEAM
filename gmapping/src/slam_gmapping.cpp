@@ -280,6 +280,11 @@ void SlamGMapping::startLiveSlam()
   pozyx_filter_sub_ = new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "pozyx_position", 5);
   pozyx_filter_ = new tf::MessageFilter<geometry_msgs::PoseStamped>(*pozyx_filter_sub_, tf_, odom_frame_, 5);
   pozyx_filter_->registerCallback(boost::bind(&SlamGMapping::pozyxCallback, this, _1));
+
+  odometry_filter_sub_ = new message_filters::Subscriber<nav_msgs::Odometry>(node_, "odom", 5);
+  odometry_filter_ = new tf::MessageFilter<nav_msgs::Odometry>(*odometry_filter_sub_, tf_, odom_frame_, 5);
+  odometry_filter_->registerCallback(boost::bind(&SlamGMapping::odomCallback, this, _1));
+
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
@@ -575,6 +580,10 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
      return false;
  }
 
+ if(!got_first_odom_){
+     return false;
+ }
+
   if(scan.ranges.size() != gsp_laser_beam_count_) {
     ROS_DEBUG("scan ranges are the wrong size");
     return false;
@@ -626,50 +635,44 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
             gmap_pose.theta);
             */
 
-  if(policy_.compare("slam")==0 || policy_.compare("odom-only")==0){
+  ros::Duration delay = pozyxtime - scan.header.stamp;
+  ROS_DEBUG("%d",delay.sec*1000+delay.nsec/1000000);
+
+  if(policy_.compare("slam")==0){
+      active_policy_ = 0;
       ROS_DEBUG("processing scan");
       return gsp_->processScan(reading);
   } else {
-      // Lilly
       // create node from pozyxpose, reading, parent
-      if(got_first_pozyx_ && policy_.compare("clam")==0){
+      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 25){
           // pose, weight, parent, childs
-          ros::Duration delay = pozyxtime - scan.header.stamp;
-          ROS_DEBUG("%d",delay.sec*1000+delay.nsec/1000000);
-          if(abs(delay.sec*1000+delay.nsec/1000000) <= 500) {
-              ROS_DEBUG("Making Tnode");
-              GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
-                                            &(reading[0]),
-                                            static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
-                                            reading.getTime());
-
-              GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(pozyxpose,0,p,0);
-              np->reading = reading_copy;
-              p = np;
-              return true;
-          }else{
-              ROS_DEBUG("Delay between pozyxpose and reading is too high.");
-              GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
-                                            &(reading[0]),
-                                            static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
-                                            reading.getTime());
-
-              GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(gmap_pose,0,p,0);
-              np->reading = reading_copy;
-              p = np;
-              return true;
-          }
-      }else{
-          ROS_DEBUG("Not using pozy, Making Tnode");
+          active_policy_ = 1;
+          ROS_DEBUG("Making Tnode");
           GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
                                         &(reading[0]),
                                         static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
                                         reading.getTime());
 
-          GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(gmap_pose,0,p,0);
+          GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(pozyxpose,0,p,0);
           np->reading = reading_copy;
           p = np;
           return true;
+      } else {
+          if (got_first_odom_ && policy_.compare("odom-only")==0){
+              active_policy_ = 2;
+              ROS_DEBUG("Not using pozyx, Making Tnode");
+              GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
+                                            &(reading[0]),
+                                            static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
+                                            reading.getTime());
+
+              GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(most_recent_odom,0,p,0);
+              np->reading = reading_copy;
+              p = np;
+              return true;
+          } else {
+              return false;
+          }
       }
   }
 }
@@ -710,6 +713,36 @@ SlamGMapping::pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx)
 }
 
 void
+SlamGMapping::odomCallback(const nav_msgs::Odometry::ConstPtr& odom)
+{
+    if (got_first_scan_){
+        tf::Quaternion q(
+            odom->pose.pose.orientation.x,
+            odom->pose.pose.orientation.y,
+            odom->pose.pose.orientation.z,
+            odom->pose.pose.orientation.w
+        );
+        tf::Matrix3x3 m(q);
+        double roll, pitch, yaw;
+        m.getRPY(roll,pitch,yaw);
+
+        if(!got_first_odom_){
+            most_recent_odom.x = odom->pose.pose.position.x;
+            most_recent_odom.y = odom->pose.pose.position.y;
+            most_recent_odom.theta = yaw;
+            initialOdometryPose = most_recent_odom;
+            ROS_DEBUG("INITIAL ODOMETRY POSE: %.3f %.3f %.3f", initialOdometryPose.x, initialOdometryPose.y, initialOdometryPose.theta);
+            ROS_DEBUG("INITIAL ODOM POSE: %.3f %.3f %.3f", initialOdomPose.x, initialOdomPose.y, initialOdomPose.theta);
+        }
+        most_recent_odom.x = odom->pose.pose.position.x-initialOdometryPose.x+initialOdomPose.x;
+        most_recent_odom.y = odom->pose.pose.position.y-initialOdometryPose.y+initialOdomPose.y;
+        most_recent_odom.theta = yaw-initialOdometryPose.theta+initialOdomPose.theta;
+
+        got_first_odom_ = true;
+    }
+}
+
+void
 SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
   laser_count_++;
@@ -733,7 +766,7 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     ROS_DEBUG("scan processed");
 
     // Lilly
-    if(policy_.compare("slam")==0 || policy_.compare("odom-only")==0) {
+    if(active_policy_==0) {
         ROS_INFO("using slam");
         GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
 
@@ -749,59 +782,38 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         map_to_odom_mutex_.unlock();
     }
 
-    if(policy_.compare("clam")==0) {
-        ros::Duration pozyx_freshness = ros::Time::now() - pozyxtime;
-        if(abs(pozyx_freshness.sec*1000+pozyx_freshness.nsec/1000000) <= 5000) {
-            if(got_first_pozyx_){
-                ROS_INFO("using clam");
-                // addScan(*scan, pozyxpose);
+    if(active_policy_==1) {
+        ROS_INFO("using clam");
+        // addScan(*scan, pozyxpose);
 
-                ROS_INFO("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
-                ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-                ROS_INFO("error: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
+        ROS_INFO("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
+        ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
+        ROS_INFO("error: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
 
-                // tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta-initialPose.theta),
-                                                           // tf::Vector3(pozyxpose.x-initialPose.x, pozyxpose.y-initialPose.y, 0.0)).inverse();
-                tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta), tf::Vector3(pozyxpose.x, pozyxpose.y, 0.0)).inverse();
-                tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
+        // tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta-initialPose.theta),
+                                                   // tf::Vector3(pozyxpose.x-initialPose.x, pozyxpose.y-initialPose.y, 0.0)).inverse();
+        tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta), tf::Vector3(pozyxpose.x, pozyxpose.y, 0.0)).inverse();
+        tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
 
-                map_to_odom_mutex_.lock();
-                map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
-                map_to_odom_mutex_.unlock();
-            } else {
-                ROS_INFO("using odom because haven't received a pozyx");
-                // addScan(*scan, pozyxpose);
+        map_to_odom_mutex_.lock();
+        map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
+        map_to_odom_mutex_.unlock();
+    }
 
-                // ROS_INFO("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
-                ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-                // ROS_INFO("error: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
+    if(active_policy_==2 && got_first_odom_) {
+        ROS_INFO("using odometry");
+        ROS_INFO("odometry pose: %.3f %.3f %.3f", most_recent_odom.x, most_recent_odom.y, most_recent_odom.theta);
+        ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
+        ROS_INFO("error: %.3f %.3f %.3f", most_recent_odom.x - odom_pose.x, most_recent_odom.y - odom_pose.y, most_recent_odom.theta - odom_pose.theta);
 
-                // tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta-initialPose.theta),
-                                                           // tf::Vector3(pozyxpose.x-initialPose.x, pozyxpose.y-initialPose.y, 0.0)).inverse();
-                tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0)).inverse();
-                tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
+        // tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta-initialPose.theta),
+                                                   // tf::Vector3(pozyxpose.x-initialPose.x, pozyxpose.y-initialPose.y, 0.0)).inverse();
+        tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, most_recent_odom.theta), tf::Vector3(most_recent_odom.x, most_recent_odom.y, 0.0)).inverse();
+        tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
 
-                map_to_odom_mutex_.lock();
-                map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
-                map_to_odom_mutex_.unlock();
-            }
-        } else {
-            ROS_INFO("using odom because pozyx data isn't fresh");
-            // addScan(*scan, pozyxpose);
-
-            // ROS_INFO("pozyx pose: %.3f %.3f %.3f", pozyxpose.x, pozyxpose.y, pozyxpose.theta);
-            ROS_INFO("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-            // ROS_INFO("error: %.3f %.3f %.3f", pozyxpose.x - odom_pose.x, pozyxpose.y - odom_pose.y, pozyxpose.theta - odom_pose.theta);
-
-            // tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, pozyxpose.theta-initialPose.theta),
-                                                       // tf::Vector3(pozyxpose.x-initialPose.x, pozyxpose.y-initialPose.y, 0.0)).inverse();
-            tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0)).inverse();
-            tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
-
-            map_to_odom_mutex_.lock();
-            map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
-            map_to_odom_mutex_.unlock();
-        }
+        map_to_odom_mutex_.lock();
+        map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
+        map_to_odom_mutex_.unlock();
     }
 
     if(!got_map_ || (scan->header.stamp - last_map_update) > map_update_interval_)
@@ -870,7 +882,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
                                 delta_);
 
   // Lilly
-  if(policy_.compare("slam")==0 || policy_.compare("odom-only")==0) {
+  if(policy_.compare("slam")==0) {
       GMapping::GridSlamProcessor::Particle best =
               gsp_->getParticles()[gsp_->getBestParticleIndex()];
 
@@ -900,7 +912,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   }
 
   // Lilly
-  if(policy_.compare("clam")==0) {
+  if(policy_.compare("clam")==0  || policy_.compare("odom-only")==0) {
       ROS_DEBUG("(clam) Trajectory tree:");
       for(GMapping::GridSlamProcessor::TNode* n = p;
           n->parent!=NULL;
@@ -922,16 +934,33 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
       	         plainReading[i]=(*n->reading)[i];
             }
 
-            // GMapping::OrientedPoint corrected;
-            // double score, l, s;
-            // score=matcher.optimize(corrected, smap, n->pose, plainReading);
-            // ROS_INFO("score: %.3f",score);
-            // if (score>minimum_score_){
-            //     ROS_INFO("CORRECTING POSE WITH MAP");
-            //     n->pose=corrected;
-            // } else {
-            //     ROS_INFO("NOT CORRECTING POSE");
-            // }
+            matcher.invalidateActiveArea();
+            matcher.computeActiveArea(smap, n->pose, plainReading);
+            matcher.registerScan(smap, n->pose, plainReading);
+        }
+  }
+
+  if(policy_.compare("odom-only")==0) {
+      ROS_DEBUG("(odom-only) Trajectory tree:");
+      for(GMapping::GridSlamProcessor::TNode* n = p;
+          n->parent!=NULL;
+          n = n->parent)
+          {
+            ROS_DEBUG("  %.3f %.3f %.3f",
+                      n->pose.x,
+                      n->pose.y,
+                      n->pose.theta);
+            if(!n->reading)
+            {
+              ROS_INFO("Reading is NULL");
+              continue;
+            }
+
+            assert((*n->reading).size()==gsp_laser_beam_count_);
+            double * plainReading = new double[gsp_laser_beam_count_];
+            for(unsigned int i=0; i<gsp_laser_beam_count_; i++){
+                   plainReading[i]=(*n->reading)[i];
+            }
 
             matcher.invalidateActiveArea();
             matcher.computeActiveArea(smap, n->pose, plainReading);

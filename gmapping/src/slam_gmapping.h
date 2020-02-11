@@ -37,6 +37,7 @@
 
 #include "std_msgs/Float64.h"
 #include "nav_msgs/GetMap.h"
+#include "nav_msgs/Odometry.h"
 #include "tf/transform_listener.h"
 #include "tf/transform_broadcaster.h"
 #include "message_filters/subscriber.h"
@@ -63,7 +64,7 @@ class SlamGMapping
     // Lilly
     // void pozyxCallback(const gazebo_msgs::ModelState::ConstPtr& pozyx);
     void pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx);
-
+    void odomCallback(const nav_msgs::Odometry::ConstPtr& odom);
     void laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan);
     bool mapCallback(nav_msgs::GetMap::Request  &req,
                      nav_msgs::GetMap::Response &res);
@@ -82,6 +83,12 @@ class SlamGMapping
     // ros::Subscriber pozyx_sub_;
     message_filters::Subscriber<geometry_msgs::PoseStamped>* pozyx_filter_sub_;
     tf::MessageFilter<geometry_msgs::PoseStamped>* pozyx_filter_;
+    // odometry
+    message_filters::Subscriber<nav_msgs::Odometry>* odometry_filter_sub_;
+    tf::MessageFilter<nav_msgs::Odometry>* odometry_filter_;
+    GMapping::OrientedPoint most_recent_odom;
+    bool got_first_odom_;
+
     tf::TransformBroadcaster* tfB_;
 
     GMapping::GridSlamProcessor* gsp_;
@@ -108,6 +115,9 @@ class SlamGMapping
     ros::Time pozyxtime;
     GMapping::GridSlamProcessor::TNode* p;
     GMapping::OrientedPoint initialOdomPose;
+    GMapping::OrientedPoint initialOdometryPose;
+    // I'm sorry, I know this is super confusing but odom is the getOdomPose() result
+    // Odometry is from the actually odom topic, and is based on the odometer
     GMapping::OrientedPoint initialPozyxPose;
 
     ros::Duration map_update_interval_;
@@ -126,6 +136,9 @@ class SlamGMapping
     std::string laser_frame_;
     std::string map_frame_;
     std::string odom_frame_;
+
+    int active_policy_;
+    // 0 SLAM 1 CLAM 2 ODOM
 
     void updateMap(const sensor_msgs::LaserScan& scan);
     bool getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t);
