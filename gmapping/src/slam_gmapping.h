@@ -128,6 +128,9 @@ class SlamGMapping
     int laser_count_;
     int throttle_scans_;
 
+    int pozyx_count_;
+    int throttle_pozyx_;
+
     boost::thread* transform_thread_;
 
     // Lilly

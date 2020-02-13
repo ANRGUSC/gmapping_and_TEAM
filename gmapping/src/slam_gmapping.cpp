@@ -140,7 +140,7 @@ Initial map dimensions and resolution:
 
 SlamGMapping::SlamGMapping():
   map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0), private_nh_("~"), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL)
+  laser_count_(0), pozyx_count_(0), private_nh_("~"), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL)
 {
   seed_ = time(NULL);
   init();
@@ -148,7 +148,7 @@ SlamGMapping::SlamGMapping():
 
 SlamGMapping::SlamGMapping(ros::NodeHandle& nh, ros::NodeHandle& pnh):
   map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0),node_(nh), private_nh_(pnh), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL)
+  laser_count_(0), pozyx_count_(0), node_(nh), private_nh_(pnh), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL)
 {
   seed_ = time(NULL);
   init();
@@ -156,7 +156,7 @@ SlamGMapping::SlamGMapping(ros::NodeHandle& nh, ros::NodeHandle& pnh):
 
 SlamGMapping::SlamGMapping(long unsigned int seed, long unsigned int max_duration_buffer):
   map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0), private_nh_("~"), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL),
+  laser_count_(0), pozyx_count_(0), private_nh_("~"), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL),
   seed_(seed), tf_(ros::Duration(max_duration_buffer))
 {
   init();
@@ -183,6 +183,8 @@ void SlamGMapping::init()
 
   // Lilly
   got_first_pozyx_ = false;
+  if(!private_nh_.getParam("throttle_pozyx",throttle_pozyx_))
+    throttle_pozyx_ = 1;
 
   // Parameters used by our GMapping wrapper
   if(!private_nh_.getParam("throttle_scans", throttle_scans_))
@@ -644,7 +646,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
       return gsp_->processScan(reading);
   } else {
       // create node from pozyxpose, reading, parent
-      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 25){
+      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 500){
           // pose, weight, parent, childs
           active_policy_ = 1;
           ROS_DEBUG("Making Tnode");
@@ -681,6 +683,10 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
 void
 SlamGMapping::pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx)
 {
+    pozyx_count_++;
+    if ((pozyx_count_ % throttle_pozyx_) != 0)
+      return;
+
     if(got_first_scan_) {
         ROS_DEBUG("pozyx callback");
 
@@ -891,11 +897,13 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
       if(entropy.data > 0.0)
         entropy_publisher_.publish(entropy);
 
-      ROS_DEBUG("(slam) Trajectory tree:");
+      ROS_INFO("(slam) Trajectory tree:");
+      int count = 0;
       for(GMapping::GridSlamProcessor::TNode* n = best.node;
           n;
           n = n->parent)
       {
+        count++;
         ROS_DEBUG("  %.3f %.3f %.3f",
                   n->pose.x,
                   n->pose.y,
@@ -909,15 +917,18 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
         matcher.computeActiveArea(smap, n->pose, &((*n->reading)[0]));
         matcher.registerScan(smap, n->pose, &((*n->reading)[0]));
       }
+      ROS_INFO("Tnodes: %d",count);
   }
 
   // Lilly
   if(policy_.compare("clam")==0  || policy_.compare("odom-only")==0) {
-      ROS_DEBUG("(clam) Trajectory tree:");
+      ROS_INFO("(clam) Trajectory tree:");
+      int count = 0;
       for(GMapping::GridSlamProcessor::TNode* n = p;
           n->parent!=NULL;
           n = n->parent)
           {
+            count++;
             ROS_DEBUG("  %.3f %.3f %.3f",
                       n->pose.x,
                       n->pose.y,
@@ -938,6 +949,7 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
             matcher.computeActiveArea(smap, n->pose, plainReading);
             matcher.registerScan(smap, n->pose, plainReading);
         }
+        ROS_INFO("Tnodes: %d",count);
   }
 
   if(policy_.compare("odom-only")==0) {
