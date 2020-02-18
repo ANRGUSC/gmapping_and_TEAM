@@ -75,6 +75,11 @@ class SlamGMapping
     ros::Publisher entropy_publisher_;
     ros::Publisher sst_;
     ros::Publisher sstm_;
+
+    ros::Publisher position_estimate_x_;
+    ros::Publisher position_estimate_y_;
+    ros::Publisher position_estimate_theta_;
+
     ros::ServiceServer ss_;
     tf::TransformListener tf_;
     message_filters::Subscriber<sensor_msgs::LaserScan>* scan_filter_sub_;
@@ -113,6 +118,7 @@ class SlamGMapping
     bool got_first_pozyx_;
     GMapping::OrientedPoint pozyxpose;
     ros::Time pozyxtime;
+    ros::Time odomtime;
     GMapping::GridSlamProcessor::TNode* p;
     GMapping::OrientedPoint initialOdomPose;
     GMapping::OrientedPoint initialOdometryPose;
