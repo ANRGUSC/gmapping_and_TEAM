@@ -652,8 +652,8 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
       return gsp_->processScan(reading);
   } else {
       // create node from pozyxpose, reading, parent
-      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 250){
-      // if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 10){
+      // if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 250){
+      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 10){
           // pose, weight, parent, childs
           active_policy_ = 1;
           ROS_INFO("Making Tnode");
@@ -667,8 +667,8 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
           p = np;
           return true;
       } else {
-          // if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 10){
-          if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 250){
+          if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 10){
+          // if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 250){
               active_policy_ = 2;
               ROS_DEBUG("Not using pozyx, Making Tnode");
               GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
@@ -714,15 +714,15 @@ SlamGMapping::pozyxCallback(const geometry_msgs::PoseStamped::ConstPtr& pozyx)
             initialPozyxPose = pozyxpose;
         }
         if (got_first_pozyx_) {ROS_DEBUG("pozyx callback");}
-        // pozyxpose.x = pozyx->pose.position.x-initialPozyxPose.x+initialOdomPose.x;
-        // pozyxpose.y = pozyx->pose.position.y-initialPozyxPose.y+initialOdomPose.y;
-        // pozyxpose.theta = yaw-initialPozyxPose.theta+initialOdomPose.theta;
+        pozyxpose.x = pozyx->pose.position.x-initialPozyxPose.x+initialOdomPose.x;
+        pozyxpose.y = pozyx->pose.position.y-initialPozyxPose.y+initialOdomPose.y;
+        pozyxpose.theta = yaw-initialPozyxPose.theta+initialOdomPose.theta;
         pozyxtime = pozyx->header.stamp;
 
-        pozyxpose.x = pozyx->pose.position.x;
-        pozyxpose.y = pozyx->pose.position.y;
-        pozyxpose.theta = yaw+3.14159265358;
-        pozyxtime = pozyx->header.stamp;
+        // pozyxpose.x = pozyx->pose.position.x;
+        // pozyxpose.y = pozyx->pose.position.y;
+        // pozyxpose.theta = yaw+3.14159265358;
+        // pozyxtime = pozyx->header.stamp;
 
         got_first_pozyx_ = true;
     }
@@ -750,14 +750,14 @@ SlamGMapping::odomCallback(const nav_msgs::Odometry::ConstPtr& odom)
             ROS_DEBUG("INITIAL ODOMETRY POSE: %.3f %.3f %.3f", initialOdometryPose.x, initialOdometryPose.y, initialOdometryPose.theta);
             ROS_DEBUG("INITIAL ODOM POSE: %.3f %.3f %.3f", initialOdomPose.x, initialOdomPose.y, initialOdomPose.theta);
         }
-        // most_recent_odom.x = odom->pose.pose.position.x-initialOdometryPose.x+initialOdomPose.x;
-        // most_recent_odom.y = odom->pose.pose.position.y-initialOdometryPose.y+initialOdomPose.y;
-        // most_recent_odom.theta = yaw-initialOdometryPose.theta+initialOdomPose.theta;
-        // odomtime = odom->header.stamp;
+        most_recent_odom.x = odom->pose.pose.position.x-initialOdometryPose.x+initialOdomPose.x;
+        most_recent_odom.y = odom->pose.pose.position.y-initialOdometryPose.y+initialOdomPose.y;
+        most_recent_odom.theta = yaw-initialOdometryPose.theta+initialOdomPose.theta;
+        odomtime = odom->header.stamp;
 
-        most_recent_odom.x = odom->pose.pose.position.x;
-        most_recent_odom.y = odom->pose.pose.position.y;
-        most_recent_odom.theta = yaw+3.14159265358;
+        // most_recent_odom.x = odom->pose.pose.position.x;
+        // most_recent_odom.y = odom->pose.pose.position.y;
+        // most_recent_odom.theta = yaw+3.14159265358;
 
         got_first_odom_ = true;
     }
