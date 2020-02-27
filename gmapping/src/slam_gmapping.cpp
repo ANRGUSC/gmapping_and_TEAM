@@ -652,7 +652,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
       return gsp_->processScan(reading);
   } else {
       // create node from pozyxpose, reading, parent
-      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 250){
+      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 100){
       // if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 10){
           // pose, weight, parent, childs
           active_policy_ = 1;
@@ -668,7 +668,7 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
           return true;
       } else {
           // if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 10){
-          if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 250){
+          if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 100){
               active_policy_ = 2;
               ROS_DEBUG("Not using pozyx, Making Tnode");
               GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
