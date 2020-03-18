@@ -649,14 +649,20 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
   if(policy_.compare("slam")==0){
       active_policy_ = 0;
       ROS_DEBUG("processing scan");
-      return gsp_->processScan(reading);
+      double secs = ros::Time::now().toSec();
+      if (gsp_->processScan(reading)) {
+          double secs2 = ros::Time::now().toSec();
+          ROS_INFO("Time to process scan (SLAM): %f",secs2-secs);
+           return true;
+      }
   } else {
       // create node from pozyxpose, reading, parent
       // if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 250){
-      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 10){
+      if(got_first_pozyx_ && policy_.compare("clam")==0 && abs(delay.sec*1000+delay.nsec/1000000) <= 100){
           // pose, weight, parent, childs
           active_policy_ = 1;
           ROS_INFO("Making Tnode");
+          ros::Time begin = ros::Time::now();
           GMapping::RangeReading* reading_copy = new GMapping::RangeReading(reading.size(),
                                         &(reading[0]),
                                         static_cast<const GMapping::RangeSensor*>(reading.getSensor()),
@@ -665,6 +671,8 @@ SlamGMapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoin
           GMapping::GridSlamProcessor::TNode* np = new GMapping::GridSlamProcessor::TNode(pozyxpose,0,p,0);
           np->reading = reading_copy;
           p = np;
+          ros::Time end = ros::Time::now();
+          ROS_INFO("Time to process scan (CLAM): %u",end.nsec-begin.nsec);
           return true;
       } else {
           if (got_first_odom_ && policy_.compare("odom-only")==0 && abs(delay_odom.sec*1000+delay_odom.nsec/1000000) <= 10){
@@ -781,9 +789,11 @@ SlamGMapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
   }
 
   GMapping::OrientedPoint odom_pose;
-
+  double secs = ros::Time::now().toSec();
   if(addScan(*scan, odom_pose))
   {
+    double secs2 = ros::Time::now().toSec();
+    ROS_INFO("Total time to process scan: %f",secs2-secs);
     ROS_DEBUG("scan processed");
 
     std_msgs::Float64 x;
@@ -900,6 +910,7 @@ void
 SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
 {
   ROS_DEBUG("Update map");
+  double secs = ros::Time::now().toSec();
   boost::mutex::scoped_lock map_lock (map_mutex_);
   GMapping::ScanMatcher matcher;
 
@@ -1077,6 +1088,9 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   // ros::Duration(1.0*rand_/RAND_MAX).sleep();
   sst_.publish(map_.map);
   sstm_.publish(map_.map.info);
+  double secs2 = ros::Time::now().toSec();
+  ROS_INFO("Time to update map: %f",secs2-secs);
+
 }
 
 bool
